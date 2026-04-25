@@ -73,22 +73,38 @@ void FeatureMatcher::extractFeatures()
 
       // Remeber to Look-up features colors!
       
-      std::string feature_file = images_names_[i] + ".yaml"; 
+      std::string img_path = images_names_[i];
+      
+      size_t last_slash_idx = img_path.find_last_of("\\/");
+      std::string filename = img_path.substr(last_slash_idx + 1);
+      std::string method_folder = "aliked_1"; // e.g., "aliked", "xfeat", "dedode"
+      std::string feature_file = "../datasets/" + method_folder + "/" + filename + ".yaml"; 
+
       cv::FileStorage fs(feature_file, cv::FileStorage::READ);
       
-      if(fs.isOpened()) {
-          fs["keypoints"] >> features_[i];
+     if(fs.isOpened()) {
+          cv::Mat kpts_mat;
+          
+          fs["keypoints"] >> kpts_mat;
           fs["descriptors"] >> descriptors_[i];
           fs.release();
+
+          features_[i].clear();
+          for (int r = 0; r < kpts_mat.rows; ++r) {
+              float x = kpts_mat.at<float>(r, 0);
+              float y = kpts_mat.at<float>(r, 1);
+              features_[i].push_back(cv::KeyPoint(x, y, 1.0f));
+          }
       } else {
-          std::cerr << "Error: Could not load modern features from " << feature_file << std::endl;
+          std::cerr << "\n[ERROR] Could not load features from: " << feature_file << std::endl;
+          // Use exit instead of continuing so it doesn't crash later
+          exit(EXIT_FAILURE); 
       }
 
-      // Look-up features colors (Required for point cloud visualization!)
+      // Look-up features colors
       feats_colors_[i].reserve(features_[i].size());
       for( auto &f : features_[i])
       {
-        // Ensure coordinates are within image bounds before extracting color
         int x = std::min(std::max(cvRound(f.pt.x), 0), img.cols - 1);
         int y = std::min(std::max(cvRound(f.pt.y), 0), img.rows - 1);
         feats_colors_[i].emplace_back(img.at<cv::Vec3b>(y, x));
@@ -133,9 +149,8 @@ void FeatureMatcher::exhaustiveMatching()
         // In this case, you may follow OPTION A or OPTION A (see above).
         /////////////////////////////////////////////////////////////////////////////////////////
 
-        //
-        // Add your code here
-        //
+        auto matcher = cv::BFMatcher::create(cv::NORM_L2, true); 
+        matcher->match(descriptors_[i], descriptors_[j], matches);
 
         /////////////////////////////////////////////////////////////////////////////////////////
 
@@ -164,8 +179,7 @@ void FeatureMatcher::exhaustiveMatching()
       // where i,j matched images indices.
       /////////////////////////////////////////////////////////////////////////////////////////
       
-    //////////////////////////// Code to be completed (1/7) /////////////////////////////////
-      
+   //////////////////////////// Code to be completed (1/7) /////////////////////////////////
       if (matches.size() > 5) 
       {
           std::vector<cv::Point2f> pts1, pts2;
@@ -176,10 +190,14 @@ void FeatureMatcher::exhaustiveMatching()
           }
 
           cv::Mat mask_E, mask_H;
-        
-          cv::findEssentialMat(pts1, pts2, new_intrinsics_matrix_, cv::USAC_MAGSAC, 0.99, 1.0, mask_E);
           
-          cv::findHomography(pts1, pts2, cv::USAC_MAGSAC, 1.0, mask_H);
+          // SMART THRESHOLD: 
+          // 1.0 pixels for highly accurate modern deep-learning features.
+          // 3.0 pixels for sloppier classical ORB features to prevent finding 0 points.
+          double inlier_threshold = 1.0 ;
+          
+          cv::findEssentialMat(pts1, pts2, new_intrinsics_matrix_, cv::USAC_MAGSAC, 0.99, inlier_threshold, mask_E);
+          cv::findHomography(pts1, pts2, cv::USAC_MAGSAC, inlier_threshold, mask_H);
 
           for (size_t k = 0; k < matches.size(); k++) {
               bool is_inlier_E = !mask_E.empty() && mask_E.at<uchar>(k) == 1;
@@ -214,17 +232,17 @@ void FeatureMatcher::writeToFile ( const std::string& filename, bool normalize_p
 
   double *tmp_observations;
   cv::Mat dst_pts;
-  if(normalize_points)
-  {
-    cv::Mat src_obs( num_observations_,1, cv::traits::Type<cv::Vec2d>::value,
-                     const_cast<double *>(observations_.data()));
-    cv::undistortPoints(src_obs, dst_pts, new_intrinsics_matrix_, cv::Mat());
-    tmp_observations = reinterpret_cast<double *>(dst_pts.data);
-  }
-  else
-  {
-    tmp_observations = const_cast<double *>(observations_.data());
-  }
+    if(normalize_points)
+    {
+      cv::Mat src_obs( num_observations_,1, cv::traits::Type<cv::Vec2d>::value,
+                      const_cast<double *>(observations_.data()));
+      cv::undistortPoints(src_obs, dst_pts, new_intrinsics_matrix_, cv::Mat());
+      tmp_observations = reinterpret_cast<double *>(dst_pts.data);
+    }
+    else
+    {
+      tmp_observations = const_cast<double *>(observations_.data());
+    }
 
   for (int i = 0; i < num_observations_; ++i)
   {
