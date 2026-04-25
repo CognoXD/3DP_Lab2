@@ -72,10 +72,27 @@ void FeatureMatcher::extractFeatures()
       // loadExternalFeatures(image_path, features_[i], descriptors_[i]);
 
       // Remeber to Look-up features colors!
+      
+      std::string feature_file = images_names_[i] + ".yaml"; 
+      cv::FileStorage fs(feature_file, cv::FileStorage::READ);
+      
+      if(fs.isOpened()) {
+          fs["keypoints"] >> features_[i];
+          fs["descriptors"] >> descriptors_[i];
+          fs.release();
+      } else {
+          std::cerr << "Error: Could not load modern features from " << feature_file << std::endl;
+      }
 
-      //
-      // Add your code here
-      //
+      // Look-up features colors (Required for point cloud visualization!)
+      feats_colors_[i].reserve(features_[i].size());
+      for( auto &f : features_[i])
+      {
+        // Ensure coordinates are within image bounds before extracting color
+        int x = std::min(std::max(cvRound(f.pt.x), 0), img.cols - 1);
+        int y = std::min(std::max(cvRound(f.pt.y), 0), img.rows - 1);
+        feats_colors_[i].emplace_back(img.at<cv::Vec3b>(y, x));
+      }
     }
     else
     {
@@ -147,9 +164,37 @@ void FeatureMatcher::exhaustiveMatching()
       // where i,j matched images indices.
       /////////////////////////////////////////////////////////////////////////////////////////
       
-      //
-      // Add your code here
-      //
+    //////////////////////////// Code to be completed (1/7) /////////////////////////////////
+      
+      if (matches.size() > 5) 
+      {
+          std::vector<cv::Point2f> pts1, pts2;
+          
+          for (const auto& m : matches) {
+              pts1.push_back(features_[i][m.queryIdx].pt);
+              pts2.push_back(features_[j][m.trainIdx].pt);
+          }
+
+          cv::Mat mask_E, mask_H;
+        
+          cv::findEssentialMat(pts1, pts2, new_intrinsics_matrix_, cv::USAC_MAGSAC, 0.99, 1.0, mask_E);
+          
+          cv::findHomography(pts1, pts2, cv::USAC_MAGSAC, 1.0, mask_H);
+
+          for (size_t k = 0; k < matches.size(); k++) {
+              bool is_inlier_E = !mask_E.empty() && mask_E.at<uchar>(k) == 1;
+              bool is_inlier_H = !mask_H.empty() && mask_H.at<uchar>(k) == 1;
+
+              if (is_inlier_E || is_inlier_H) {
+                  inlier_matches.push_back(matches[k]);
+              }
+          }
+
+          if (inlier_matches.size() > 5) {
+              setMatches(i, j, inlier_matches);
+          }
+      }
+      /////////////////////////////////////////////////////////////////////////////////////////
 
       /////////////////////////////////////////////////////////////////////////////////////////
     }
