@@ -529,8 +529,7 @@ bool BasicSfM::incrementalReconstruction( int seed_pair_idx0, int seed_pair_idx1
   // init_t_vec; defined above
   /////////////////////////////////////////////////////////////////////////////////////////
 
-// 1. Estimate Essential and Homography matrices
-  // We use 0.001 because we are working with normalized camera coordinates, not raw pixels.
+
   double threshold = 0.001; 
   cv::Mat E = cv::findEssentialMat(points0, points1, intrinsics_matrix, cv::RANSAC, 0.999, threshold, inlier_mask_E);
   cv::Mat H = cv::findHomography(points0, points1, cv::RANSAC, threshold, inlier_mask_H);
@@ -538,32 +537,24 @@ bool BasicSfM::incrementalReconstruction( int seed_pair_idx0, int seed_pair_idx1
       return false; 
   }
 
-  // 2. Count the number of inliers for both models
   int inliers_E = cv::countNonZero(inlier_mask_E);
   int inliers_H = cv::countNonZero(inlier_mask_H);
 
-  // 3. GRIC / Model Selection Check
-  // If a Homography explains the geometry better than an Essential matrix, 
-  // it means the scene is completely flat (planar) OR the camera only rotated without moving.
-  // Neither of these allows for 3D triangulation!
+ !
   if (inliers_E <= inliers_H) {
       std::cout << "Seed pair rejected: Scene is planar or purely rotational (H >= E)." << std::endl;
       return false;
   }
 
-  // 4. Recover the Pose (Rotation and Translation matrices)
-  // This uses the Essential matrix to figure out where Camera 2 is relative to Camera 1.
   cv::recoverPose(E, points0, points1, intrinsics_matrix, init_r_mat, init_t_vec, inlier_mask_E);
 
-  // 5. Sideward Motion Check
-  // init_t_vec is a 3x1 vector [tx, ty, tz] representing movement in 3D space.
+ .
   // tz is forward/backward movement. tx and ty are sideward/upward movement.
   double tx = std::abs(init_t_vec.at<double>(0, 0));
   double ty = std::abs(init_t_vec.at<double>(1, 0));
   double tz = std::abs(init_t_vec.at<double>(2, 0));
 
-  // Triangulation relies on parallax. If you move straight forward (high tz), parallax is terrible.
-  // We want wide baseline, sideward motion!
+  
   if (tz > (tx + ty)) {
       std::cout << "Seed pair rejected: Forward motion detected. Seeking sideward motion." << std::endl;
       return false;
