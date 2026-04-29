@@ -22,10 +22,39 @@ struct ReprojectionError
   // WARNING: When dealing with the AutoDiffCostFunction template parameters,
   // pay attention to the order of the template parameters
   //////////////////////////////////////////////////////////////////////////////////////////
-  
-  //
-  // Add your code here
-  //
+  ReprojectionError(double observed_x, double observed_y)
+      : observed_x(observed_x), observed_y(observed_y) {}
+
+  template <typename T>
+  bool operator()(const T* const camera,
+                  const T* const point,
+                  T* residuals) const
+  {
+    T p[3];
+    ceres::AngleAxisRotatePoint(camera, point, p);
+    p[0] += camera[3];
+    p[1] += camera[4];
+    p[2] += camera[5];
+    T predicted_x = p[0] / p[2];
+    T predicted_y = p[1] / p[2];
+    residuals[0] = predicted_x - T(observed_x);
+    residuals[1] = predicted_y - T(observed_y);
+    return true;
+  }
+
+  static ceres::CostFunction* Create(const double observed_x,
+                                     const double observed_y)
+  {
+    // <Functor, Num_Residuals, Size_of_Camera_Block, Size_of_Point_Block>
+    // - Residuals = 2 (x and y error)
+    // - Camera = 6 (3 rotation + 3 translation)
+    // - Point = 3 (X, Y, Z)
+    return (new ceres::AutoDiffCostFunction<ReprojectionError, 2, 6, 3>(
+        new ReprojectionError(observed_x, observed_y)));
+  }
+
+  double observed_x;
+  double observed_y;
   
   /////////////////////////////////////////////////////////////////////////////////////////
 };
@@ -540,7 +569,7 @@ bool BasicSfM::incrementalReconstruction( int seed_pair_idx0, int seed_pair_idx1
   int inliers_E = cv::countNonZero(inlier_mask_E);
   int inliers_H = cv::countNonZero(inlier_mask_H);
 
- !
+ 
   if (inliers_E <= inliers_H) {
       std::cout << "Seed pair rejected: Scene is planar or purely rotational (H >= E)." << std::endl;
       return false;
@@ -548,7 +577,7 @@ bool BasicSfM::incrementalReconstruction( int seed_pair_idx0, int seed_pair_idx1
 
   cv::recoverPose(E, points0, points1, intrinsics_matrix, init_r_mat, init_t_vec, inlier_mask_E);
 
- .
+ 
   // tz is forward/backward movement. tx and ty are sideward/upward movement.
   double tx = std::abs(init_t_vec.at<double>(0, 0));
   double ty = std::abs(init_t_vec.at<double>(1, 0));
@@ -744,11 +773,50 @@ bool BasicSfM::incrementalReconstruction( int seed_pair_idx0, int seed_pair_idx1
             // pt[1] = /*X coordinate of the estimated point */;
             // pt[2] = /*X coordinate of the estimated point */;
             /////////////////////////////////////////////////////////////////////////////////////////
+            int obs_idx_new = cam_observation_[new_cam_pose_idx][pt_idx];
+            int obs_idx_old = cam_observation_[cam_idx][pt_idx];
+            points0 = { cv::Point2d(observations_[obs_idx_new * 2], observations_[obs_idx_new * 2 + 1]) };
+            points1 = { cv::Point2d(observations_[obs_idx_old * 2], observations_[obs_idx_old * 2 + 1]) };
 
-            //
-            // Add your code here
-            //
+            //Create a 3x1 vector pointing to the first 3 elements (Rotation)
+            cv::Mat r_vec0(3, 1, CV_64F, cam0_data); 
+            cv::Mat R0;
+            //Convert Angle-Axis to a 3x3 Rotation Matrix
+            cv::Rodrigues(r_vec0, R0); 
 
+            
+            R0.copyTo(proj_mat0(cv::Rect(0, 0, 3, 3))); // Copy 3x3 R
+            proj_mat0(0, 3) = cam0_data[3];             
+            proj_mat0(1, 3) = cam0_data[4];             
+            proj_mat0(2, 3) = cam0_data[5];             
+
+            cv::Mat r_vec1(3, 1, CV_64F, cam1_data); 
+            cv::Mat R1;
+            cv::Rodrigues(r_vec1, R1); 
+
+            R0.copyTo(proj_mat1(cv::Rect(0, 0, 3, 3)));
+            proj_mat1(0, 3) = cam1_data[3];            
+            proj_mat1(1, 3) = cam1_data[4];           
+            proj_mat1(2, 3) = cam1_data[5];
+            
+            cv::triangulatePoints(proj_mat0, proj_mat1, points0, points1, hpoints4D);
+            double X = hpoints4D.at<double>(0, 0); // Row 0
+            double Y = hpoints4D.at<double>(1, 0); // Row 1
+            double Z = hpoints4D.at<double>(2, 0); // Row 2
+            double W = hpoints4D.at<double>(3, 0); // Row 3 (The scale factor
+
+            double *pt = pointBlockPtr(pt_idx);
+            pt[0] = X / W;
+            pt[1] = Y / W;
+            pt[2] = Z / W;
+
+            if (checkCheiralityConstraint(new_cam_pose_idx, pt_idx) && checkCheiralityConstraint(cam_idx, pt_idx)) {
+                n_new_pts++;
+                pts_optim_iter_[pt_idx] = 1;
+            } else {
+                pts_optim_iter_[pt_idx] = 0;
+            }
+              
             /////////////////////////////////////////////////////////////////////////////////////////
 
           }
