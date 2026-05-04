@@ -77,7 +77,7 @@ void FeatureMatcher::extractFeatures()
       
       size_t last_slash_idx = img_path.find_last_of("\\/");
       std::string filename = img_path.substr(last_slash_idx + 1);
-      std::string method_folder = "aliked_1"; // e.g., "aliked", "xfeat", "dedode"
+      std::string method_folder = "xfeat_1"; // e.g., "aliked", "xfeat", "dedode"
       std::string feature_file = "../datasets/" + method_folder + "/" + filename + ".yaml"; 
 
       cv::FileStorage fs(feature_file, cv::FileStorage::READ);
@@ -149,7 +149,9 @@ void FeatureMatcher::exhaustiveMatching()
         // In this case, you may follow OPTION A or OPTION A (see above).
         /////////////////////////////////////////////////////////////////////////////////////////
 
-        auto matcher = cv::BFMatcher::create(cv::NORM_L2, true); 
+        auto matcher = cv::BFMatcher::create(cv::NORM_L2, true);
+        descriptors_[i].convertTo(descriptors_[i], CV_32F);
+        descriptors_[j].convertTo(descriptors_[j], CV_32F); 
         matcher->match(descriptors_[i], descriptors_[j], matches);
 
         /////////////////////////////////////////////////////////////////////////////////////////

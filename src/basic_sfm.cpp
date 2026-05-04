@@ -571,7 +571,18 @@ bool BasicSfM::incrementalReconstruction( int seed_pair_idx0, int seed_pair_idx1
 
  
   if (inliers_E <= inliers_H) {
-      std::cout << "Seed pair rejected: Scene is planar or purely rotational (H >= E)." << std::endl;
+      std::cout << "Seed pair rejected: Scene is planar or purely rotational." << std::endl;
+      return false;
+  }
+
+  double total_parallax = 0;
+  for (size_t i = 0; i < points0.size(); i++) {
+      total_parallax += cv::norm(points0[i] - points1[i]);
+  }
+  double avg_parallax = total_parallax / points0.size();
+
+  if (avg_parallax < 0.03) {
+      std::cout << "Seed pair rejected: Not enough parallax." << std::endl;
       return false;
   }
 
@@ -804,17 +815,30 @@ bool BasicSfM::incrementalReconstruction( int seed_pair_idx0, int seed_pair_idx1
             double Y = hpoints4D.at<double>(1, 0); // Row 1
             double Z = hpoints4D.at<double>(2, 0); // Row 2
             double W = hpoints4D.at<double>(3, 0); // Row 3 (The scale factor
+            if (std::abs(W) > 1e-6) 
+            {
+                double X = hpoints4D.at<double>(0, 0) / W;
+                double Y = hpoints4D.at<double>(1, 0) / W;
+                double Z = hpoints4D.at<double>(2, 0) / W;
 
-            double *pt = pointBlockPtr(pt_idx);
-            pt[0] = X / W;
-            pt[1] = Y / W;
-            pt[2] = Z / W;
+                double *pt = pointBlockPtr(pt_idx);
+                pt[0] = X;
+                pt[1] = Y;
+                pt[2] = Z;
 
-            if (checkCheiralityConstraint(new_cam_pose_idx, pt_idx) && checkCheiralityConstraint(cam_idx, pt_idx)) {
-                n_new_pts++;
-                pts_optim_iter_[pt_idx] = 1;
-            } else {
-                pts_optim_iter_[pt_idx] = 0;
+                if (checkCheiralityConstraint(new_cam_pose_idx, pt_idx) && 
+                    checkCheiralityConstraint(cam_idx, pt_idx)) {
+                    
+                    n_new_pts++;
+                    pts_optim_iter_[pt_idx] = 1;
+                } else {
+                    pts_optim_iter_[pt_idx] = -1; 
+                }
+            } 
+            else 
+            {
+                // Reject the point if W is zero
+                pts_optim_iter_[pt_idx] = -1;
             }
               
             /////////////////////////////////////////////////////////////////////////////////////////
@@ -874,11 +898,22 @@ bool BasicSfM::incrementalReconstruction( int seed_pair_idx0, int seed_pair_idx1
     // a different seed pair.
     /////////////////////////////////////////////////////////////////////////////////////////
 
-    //
-    // Add your code here
-    //
-    //  if( < reconstruction has diverged > )
-    //    return false;
+    int valid_points_count = 0;
+    for (int i = 0; i < num_points_; i++) {
+        if (pts_optim_iter_[i] > 0) {
+            valid_points_count++;
+        }
+    }
+    
+    double* new_cam = cameraBlockPtr(new_cam_pose_idx);
+    if (std::abs(new_cam[3]) > max_dist || 
+        std::abs(new_cam[4]) > max_dist || 
+        std::abs(new_cam[5]) > max_dist ||
+        valid_points_count < 10) 
+    { 
+        std::cout << "\n[WARNING] Reconstruction diverged. Aborting." << std::endl;
+        return false;
+    }
 
     /////////////////////////////////////////////////////////////////////////////////////////
   }
@@ -941,15 +976,25 @@ void BasicSfM::bundleAdjustmentIter( int new_cam_idx )
         // where 'a' is a scale parameter (e.g., 1.0 or 2 * max_reproj_err_).
         //////////////////////////////////////////////////////////////////////////////////
 
-        //
-        // Add your code here
-        //
+        double obs_x = observations_[i_obs * 2];
+        double obs_y = observations_[i_obs * 2 + 1];
+        ceres::CostFunction* cost_function = ReprojectionError::Create(obs_x, obs_y);
+        ceres::LossFunction* loss_function = new ceres::CauchyLoss(2.0 * max_reproj_err_);
+        double* camera_block = cameraBlockPtr(cam_pose_index_[i_obs]);
+        double* point_block = pointBlockPtr(point_index_[i_obs]);
+        problem.AddResidualBlock(cost_function, loss_function, camera_block, point_block);
         
         /////////////////////////////////////////////////////////////////////////////////////////
 
       }
     }
 
+    for (int i = 0; i < num_cam_poses_; ++i) {
+        if (cam_pose_optim_iter_[i] > 0) {
+            problem.SetParameterBlockConstant(cameraBlockPtr(i));
+            break; // Lock only the first active camera we find, then stop!
+        }
+    }
     Solve(options, &problem, &summary);
 
     // WARNING Here poor optimization ... :(
