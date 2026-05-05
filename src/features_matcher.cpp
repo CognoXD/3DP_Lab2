@@ -56,28 +56,12 @@ void FeatureMatcher::extractFeatures()
     // so you may only need to change Feature Matcher::exhaustive Matching()
 
     if (use_modern_features_)
-    {
-      // OPTION A: Inference inside C++
-      // 1. Load a pre-trained model (e.g., SuperPoint.onnx) using cv::dnn::readNet().
-      // 2. Convert 'img' to a blob and run net.forward().
-      // 3. Post-process the output tensors to fill features_[i] and descriptors_[i].
-      // See for example:
-      // https://docs.opencv.org/4.x/dd/d55/pytorch_cls_c_tutorial_dnn_conversion.html
-      // WARNING: By default, cv::dnn run in CPU only
-
-      // OPTION B: Data Loading (Fallback)
-      // If local hardware doesn't support inference, implement loadExternalFeatures()
-      // to read keypoints and descriptors from a file (e.g., .txt) generated
-      // beforehand by a Python script on your dataset.
-      // loadExternalFeatures(image_path, features_[i], descriptors_[i]);
-
-      // Remeber to Look-up features colors!
-      
+    { 
       std::string img_path = images_names_[i];
       
       size_t last_slash_idx = img_path.find_last_of("\\/");
       std::string filename = img_path.substr(last_slash_idx + 1);
-      std::string method_folder = "xfeat_1"; // e.g., "aliked", "xfeat", "dedode"
+      std::string method_folder = "dedode_1"; // e.g., "aliked", "xfeat", "dedode"
       std::string feature_file = "../datasets/" + method_folder + "/" + filename + ".yaml"; 
 
       cv::FileStorage fs(feature_file, cv::FileStorage::READ);
@@ -93,6 +77,11 @@ void FeatureMatcher::extractFeatures()
           for (int r = 0; r < kpts_mat.rows; ++r) {
               float x = kpts_mat.at<float>(r, 0);
               float y = kpts_mat.at<float>(r, 1);
+              //necessary if using models like DeDoDe
+              if (x <= 2.0f && y <= 2.0f) {
+                    x = x * img.cols;
+                    y = y * img.rows;
+              }
               features_[i].push_back(cv::KeyPoint(x, y, 1.0f));
           }
       } else {
@@ -153,7 +142,6 @@ void FeatureMatcher::exhaustiveMatching()
         descriptors_[i].convertTo(descriptors_[i], CV_32F);
         descriptors_[j].convertTo(descriptors_[j], CV_32F); 
         matcher->match(descriptors_[i], descriptors_[j], matches);
-
         /////////////////////////////////////////////////////////////////////////////////////////
 
       }
