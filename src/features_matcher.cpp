@@ -61,7 +61,7 @@ void FeatureMatcher::extractFeatures()
       
       size_t last_slash_idx = img_path.find_last_of("\\/");
       std::string filename = img_path.substr(last_slash_idx + 1);
-      std::string method_folder = "dedode_1"; // e.g., "aliked", "xfeat", "dedode"
+      std::string method_folder = "aliked_1"; // e.g., "aliked", "xfeat", "dedode"
       std::string feature_file = "../datasets/" + method_folder + "/" + filename + ".yaml"; 
 
       cv::FileStorage fs(feature_file, cv::FileStorage::READ);
@@ -78,7 +78,7 @@ void FeatureMatcher::extractFeatures()
               float x = kpts_mat.at<float>(r, 0);
               float y = kpts_mat.at<float>(r, 1);
               //necessary if using models like DeDoDe
-              if (x <= 2.0f && y <= 2.0f) {
+              if (method_folder.find("dedode") != std::string::npos && x <= 2.0f && y <= 2.0f) {
                     x = x * img.cols;
                     y = y * img.rows;
               }
