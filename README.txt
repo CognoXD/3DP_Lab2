@@ -3,6 +3,9 @@ Prerequisites (in debian-based distro, not required in the course Virtual Machin
 sudo apt install build-essential cmake libboost-filesystem-dev libopencv-dev libomp-dev
 sudo apt install libceres-dev libyaml-cpp-dev libgtest-dev libeigen3-dev
 
+for python files
+pip install torch torchvision opencv-python numpy lightglue
+
 Build and run the executable:
 
 mkdir build
