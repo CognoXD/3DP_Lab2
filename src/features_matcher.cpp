@@ -61,7 +61,7 @@ void FeatureMatcher::extractFeatures()
       
       size_t last_slash_idx = img_path.find_last_of("\\/");
       std::string filename = img_path.substr(last_slash_idx + 1);
-      std::string method_folder = "aliked_2"; // e.g., "aliked", "xfeat", "dedode"
+      std::string method_folder = "aliked_2"; // change this to select the folder with the requested features(e.g. images_1 -> aliked_1, xfeat_1 ....)
       std::string feature_file = "../datasets/" + method_folder + "/" + filename + ".yaml"; 
 
       cv::FileStorage fs(feature_file, cv::FileStorage::READ);
