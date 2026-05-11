@@ -56,26 +56,46 @@ void FeatureMatcher::extractFeatures()
     // so you may only need to change Feature Matcher::exhaustive Matching()
 
     if (use_modern_features_)
-    {
-      // OPTION A: Inference inside C++
-      // 1. Load a pre-trained model (e.g., SuperPoint.onnx) using cv::dnn::readNet().
-      // 2. Convert 'img' to a blob and run net.forward().
-      // 3. Post-process the output tensors to fill features_[i] and descriptors_[i].
-      // See for example:
-      // https://docs.opencv.org/4.x/dd/d55/pytorch_cls_c_tutorial_dnn_conversion.html
-      // WARNING: By default, cv::dnn run in CPU only
+    { 
+      std::string img_path = images_names_[i];
+      
+      size_t last_slash_idx = img_path.find_last_of("\\/");
+      std::string filename = img_path.substr(last_slash_idx + 1);
+      std::string method_folder = "aliked_2"; // e.g., "aliked", "xfeat", "dedode"
+      std::string feature_file = "../datasets/" + method_folder + "/" + filename + ".yaml"; 
 
-      // OPTION B: Data Loading (Fallback)
-      // If local hardware doesn't support inference, implement loadExternalFeatures()
-      // to read keypoints and descriptors from a file (e.g., .txt) generated
-      // beforehand by a Python script on your dataset.
-      // loadExternalFeatures(image_path, features_[i], descriptors_[i]);
+      cv::FileStorage fs(feature_file, cv::FileStorage::READ);
+      
+    if(fs.isOpened()) {
+          cv::Mat kpts_mat;
+          fs["keypoints"] >> kpts_mat;
+          fs["descriptors"] >> descriptors_[i];
+          fs.release();
+          std::vector<cv::Point2f> distorted_pts;
+          for (int r = 0; r < kpts_mat.rows; ++r) {
+              distorted_pts.push_back(cv::Point2f(kpts_mat.at<float>(r, 0), kpts_mat.at<float>(r, 1)));
+          }
+          std::vector<cv::Point2f> undistorted_pts;
+          cv::undistortPoints(distorted_pts, undistorted_pts, intrinsics_matrix_, dist_coeffs_, cv::noArray(), new_intrinsics_matrix_);
+          features_[i].clear();
+          for (const auto& pt : undistorted_pts) {
+              features_[i].push_back(cv::KeyPoint(pt.x, pt.y, 1.0f));
+          }
+          // ----------------------------
 
-      // Remeber to Look-up features colors!
+      } else {
+          std::cerr << "\nCould not load features from: " << feature_file << std::endl;
+          exit(EXIT_FAILURE); 
+      }
 
-      //
-      // Add your code here
-      //
+      // Look-up features colors
+      feats_colors_[i].reserve(features_[i].size());
+      for( auto &f : features_[i])
+      {
+        int x = std::min(std::max(cvRound(f.pt.x), 0), img.cols - 1);
+        int y = std::min(std::max(cvRound(f.pt.y), 0), img.rows - 1);
+        feats_colors_[i].emplace_back(img.at<cv::Vec3b>(y, x));
+      }
     }
     else
     {
@@ -116,10 +136,11 @@ void FeatureMatcher::exhaustiveMatching()
         // In this case, you may follow OPTION A or OPTION A (see above).
         /////////////////////////////////////////////////////////////////////////////////////////
 
-        //
-        // Add your code here
-        //
-
+        auto matcher = cv::BFMatcher::create(cv::NORM_L2, true);
+        //for models like XFeat
+        descriptors_[i].convertTo(descriptors_[i], CV_32F);
+        descriptors_[j].convertTo(descriptors_[j], CV_32F); 
+        matcher->match(descriptors_[i], descriptors_[j], matches);
         /////////////////////////////////////////////////////////////////////////////////////////
 
       }
@@ -147,9 +168,36 @@ void FeatureMatcher::exhaustiveMatching()
       // where i,j matched images indices.
       /////////////////////////////////////////////////////////////////////////////////////////
       
-      //
-      // Add your code here
-      //
+   //////////////////////////// Code to be completed (1/7) /////////////////////////////////
+      if (matches.size() > 5) 
+      {
+          std::vector<cv::Point2f> pts1, pts2;
+          
+          for (const auto& m : matches) {
+              pts1.push_back(features_[i][m.queryIdx].pt);
+              pts2.push_back(features_[j][m.trainIdx].pt);
+          }
+
+          cv::Mat mask_E, mask_H;
+          double inlier_threshold = 1.0;
+          
+          cv::findEssentialMat(pts1, pts2, new_intrinsics_matrix_, cv::USAC_MAGSAC, 0.99, inlier_threshold, mask_E);
+          cv::findHomography(pts1, pts2, cv::USAC_MAGSAC, inlier_threshold, mask_H);
+
+          for (size_t k = 0; k < matches.size(); k++) {
+              bool is_inlier_E = !mask_E.empty() && mask_E.at<uchar>(k) == 1;
+              bool is_inlier_H = !mask_H.empty() && mask_H.at<uchar>(k) == 1;
+
+              if (is_inlier_E || is_inlier_H) {
+                  inlier_matches.push_back(matches[k]);
+              }
+          }
+
+          if (inlier_matches.size() > 5) {
+              setMatches(i, j, inlier_matches);
+          }
+      }
+      /////////////////////////////////////////////////////////////////////////////////////////
 
       /////////////////////////////////////////////////////////////////////////////////////////
     }
@@ -169,17 +217,17 @@ void FeatureMatcher::writeToFile ( const std::string& filename, bool normalize_p
 
   double *tmp_observations;
   cv::Mat dst_pts;
-  if(normalize_points)
-  {
-    cv::Mat src_obs( num_observations_,1, cv::traits::Type<cv::Vec2d>::value,
-                     const_cast<double *>(observations_.data()));
-    cv::undistortPoints(src_obs, dst_pts, new_intrinsics_matrix_, cv::Mat());
-    tmp_observations = reinterpret_cast<double *>(dst_pts.data);
-  }
-  else
-  {
-    tmp_observations = const_cast<double *>(observations_.data());
-  }
+    if(normalize_points)
+    {
+      cv::Mat src_obs( num_observations_,1, cv::traits::Type<cv::Vec2d>::value,
+                      const_cast<double *>(observations_.data()));
+      cv::undistortPoints(src_obs, dst_pts, new_intrinsics_matrix_, cv::Mat());
+      tmp_observations = reinterpret_cast<double *>(dst_pts.data);
+    }
+    else
+    {
+      tmp_observations = const_cast<double *>(observations_.data());
+    }
 
   for (int i = 0; i < num_observations_; ++i)
   {
