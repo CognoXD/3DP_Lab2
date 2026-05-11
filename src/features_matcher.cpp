@@ -61,32 +61,30 @@ void FeatureMatcher::extractFeatures()
       
       size_t last_slash_idx = img_path.find_last_of("\\/");
       std::string filename = img_path.substr(last_slash_idx + 1);
-      std::string method_folder = "aliked_1"; // e.g., "aliked", "xfeat", "dedode"
+      std::string method_folder = "aliked_2"; // e.g., "aliked", "xfeat", "dedode"
       std::string feature_file = "../datasets/" + method_folder + "/" + filename + ".yaml"; 
 
       cv::FileStorage fs(feature_file, cv::FileStorage::READ);
       
-     if(fs.isOpened()) {
+    if(fs.isOpened()) {
           cv::Mat kpts_mat;
-          
           fs["keypoints"] >> kpts_mat;
           fs["descriptors"] >> descriptors_[i];
           fs.release();
-
-          features_[i].clear();
+          std::vector<cv::Point2f> distorted_pts;
           for (int r = 0; r < kpts_mat.rows; ++r) {
-              float x = kpts_mat.at<float>(r, 0);
-              float y = kpts_mat.at<float>(r, 1);
-              //necessary if using models like DeDoDe
-              if (method_folder.find("dedode") != std::string::npos && x <= 2.0f && y <= 2.0f) {
-                    x = x * img.cols;
-                    y = y * img.rows;
-              }
-              features_[i].push_back(cv::KeyPoint(x, y, 1.0f));
+              distorted_pts.push_back(cv::Point2f(kpts_mat.at<float>(r, 0), kpts_mat.at<float>(r, 1)));
           }
+          std::vector<cv::Point2f> undistorted_pts;
+          cv::undistortPoints(distorted_pts, undistorted_pts, intrinsics_matrix_, dist_coeffs_, cv::noArray(), new_intrinsics_matrix_);
+          features_[i].clear();
+          for (const auto& pt : undistorted_pts) {
+              features_[i].push_back(cv::KeyPoint(pt.x, pt.y, 1.0f));
+          }
+          // ----------------------------
+
       } else {
-          std::cerr << "\n[ERROR] Could not load features from: " << feature_file << std::endl;
-          // Use exit instead of continuing so it doesn't crash later
+          std::cerr << "\nCould not load features from: " << feature_file << std::endl;
           exit(EXIT_FAILURE); 
       }
 
@@ -139,6 +137,7 @@ void FeatureMatcher::exhaustiveMatching()
         /////////////////////////////////////////////////////////////////////////////////////////
 
         auto matcher = cv::BFMatcher::create(cv::NORM_L2, true);
+        //for models like XFeat
         descriptors_[i].convertTo(descriptors_[i], CV_32F);
         descriptors_[j].convertTo(descriptors_[j], CV_32F); 
         matcher->match(descriptors_[i], descriptors_[j], matches);
@@ -180,11 +179,7 @@ void FeatureMatcher::exhaustiveMatching()
           }
 
           cv::Mat mask_E, mask_H;
-          
-          // SMART THRESHOLD: 
-          // 1.0 pixels for highly accurate modern deep-learning features.
-          // 3.0 pixels for sloppier classical ORB features to prevent finding 0 points.
-          double inlier_threshold = 1.0 ;
+          double inlier_threshold = 1.0;
           
           cv::findEssentialMat(pts1, pts2, new_intrinsics_matrix_, cv::USAC_MAGSAC, 0.99, inlier_threshold, mask_E);
           cv::findHomography(pts1, pts2, cv::USAC_MAGSAC, inlier_threshold, mask_H);

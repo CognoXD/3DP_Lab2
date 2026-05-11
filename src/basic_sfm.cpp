@@ -911,7 +911,7 @@ bool BasicSfM::incrementalReconstruction( int seed_pair_idx0, int seed_pair_idx1
         std::abs(new_cam[5]) > max_dist ||
         valid_points_count < 10) 
     { 
-        std::cout << "\n[WARNING] Reconstruction diverged. Aborting." << std::endl;
+        std::cout << "\nReconstruction diverged." << std::endl;
         return false;
     }
 
@@ -979,7 +979,7 @@ void BasicSfM::bundleAdjustmentIter( int new_cam_idx )
         double obs_x = observations_[i_obs * 2];
         double obs_y = observations_[i_obs * 2 + 1];
         ceres::CostFunction* cost_function = ReprojectionError::Create(obs_x, obs_y);
-        ceres::LossFunction* loss_function = new ceres::HuberLoss(2.0 * max_reproj_err_);
+        ceres::LossFunction* loss_function = new ceres::CauchyLoss(2.0 * max_reproj_err_);
         double* camera_block = cameraBlockPtr(cam_pose_index_[i_obs]);
         double* point_block = pointBlockPtr(point_index_[i_obs]);
         problem.AddResidualBlock(cost_function, loss_function, camera_block, point_block);
@@ -998,30 +998,22 @@ void BasicSfM::bundleAdjustmentIter( int new_cam_idx )
     Solve(options, &problem, &summary);
 
     // --- EXTRACT TRUE PIXEL ERROR FROM CERES SUMMARY ---
-    
-    // 1. Ceres cost is mathematically: 1/2 * sum(residuals^2)
-    // To get the raw sum of squared errors, we must multiply the final_cost by 2.0
     double sum_squared_error = 2.0 * summary.final_cost;
-
-    // 2. Divide by the total number of valid observations (residuals) to get Mean Squared Error
-    // Note: summary.num_residuals is the number of 1D equations (x and y are separate).
-    // Because each point has 2 residuals (x, y), we divide by (num_residuals / 2)
     double mse_normalized = sum_squared_error / (summary.num_residuals_reduced / 2.0);
 
-    // 3. Take the square root to get the standard distance (Root Mean Square Error)
     double rmse_normalized = std::sqrt(mse_normalized);
 
-    // 4. Convert from normalized coordinate space back into physical screen pixels
-    // IMPORTANT: Change this to match your specific camera's scaled focal length!
-    // (e.g., 892.36 * 1.1 = 981.6 for Dataset 1)
+
+    // (e.g., 892.36 * 1.1 = 981.6 for  3dp_cam.yml)
+    
+    //if using the custom dataset
+    //double focal_length = 1047.33;
     double focal_length = 981.6; 
     double rmse_pixels = rmse_normalized * focal_length;
-
-    std::cout << "\n=============================================" << std::endl;
     std::cout << "CERES FINAL RMSE: " << rmse_pixels << " px" << std::endl;
-    std::cout << "=============================================\n" << std::endl;
+ 
 
-    // WARNING Here poor optimization ... :(
+ 
     // Check the cheirality constraint
     int n_cheirality_violation = 0;
     for( int i_obs = 0; i_obs < num_observations_; i_obs++ )

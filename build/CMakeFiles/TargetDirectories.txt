@@ -1,0 +1,5 @@
+/home/tdv/Documents/3D_Lab2/build/CMakeFiles/sfm.dir
+/home/tdv/Documents/3D_Lab2/build/CMakeFiles/matcher.dir
+/home/tdv/Documents/3D_Lab2/build/CMakeFiles/basic_sfm.dir
+/home/tdv/Documents/3D_Lab2/build/CMakeFiles/edit_cache.dir
+/home/tdv/Documents/3D_Lab2/build/CMakeFiles/rebuild_cache.dir
