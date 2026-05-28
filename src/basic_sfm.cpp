@@ -507,8 +507,80 @@ void BasicSfM::solve()
     }
     already_tested_pair(seed_pair_idx0, seed_pair_idx1) = 1;
 
+    // If incrementalReconstruction succeeds, compute the final metrics before exiting
     if (incrementalReconstruction( seed_pair_idx0, seed_pair_idx1 ))
     {
+      // --- FINAL MSE AND DENSITY CALCULATION (IN REAL PIXELS) ---
+      
+      // 1. Automatically load the camera calibration file
+      // Change this string depending on the dataset you are testing
+      // (e.g., "datasets/3dp_cam.yml" or "datasets/custom_cam.yml")
+      std::string camera_calib_path = "datasets/3dp_cam.yml"; 
+      
+      cv::FileStorage fs(camera_calib_path, cv::FileStorage::READ);
+      double f_x = 1.0, f_y = 1.0; // Default values (normalized coordinates)
+
+      if (fs.isOpened()) {
+          cv::Mat K;
+          fs["K"] >> K; // Extract the intrinsic matrix from the "K" node of your YAML
+          if (!K.empty()) {
+              f_x = K.at<double>(0, 0); // f_x is located at row 0, column 0
+              f_y = K.at<double>(1, 1); // f_y is located at row 1, column 1
+          }
+          fs.release();
+      } else {
+          std::cerr << "\n[WARNING] Could not open " << camera_calib_path 
+                    << ". MSE calculation will be in normalized coordinates!" << std::endl;
+      }
+
+      // 2. Error calculation
+      double total_squared_error = 0.0;
+      int valid_points_count = 0;
+
+      for( int i_obs = 0; i_obs < num_observations_; i_obs++ )
+      {
+        if( cam_pose_optim_iter_[cam_pose_index_[i_obs]] > 0 && pts_optim_iter_[point_index_[i_obs]] > 0 )
+        {
+          double *camera = cameraBlockPtr (cam_pose_index_[i_obs]),
+                 *point = pointBlockPtr (point_index_[i_obs]),
+                 *observation = observations_.data() + (i_obs * 2);
+
+          double p[3];
+          ceres::AngleAxisRotatePoint(camera, point, p);
+
+          p[0] += camera[3];
+          p[1] += camera[4];
+          p[2] += camera[5];
+
+          double predicted_x = p[0] / p[2];
+          double predicted_y = p[1] / p[2];
+
+          // Error in normalized coordinates
+          double err_x_norm = predicted_x - observation[0];
+          double err_y_norm = predicted_y - observation[1];
+
+          // CONVERSION TO REAL PIXELS by multiplying by f_x and f_y
+          double err_x_px = err_x_norm * f_x;
+          double err_y_px = err_y_norm * f_y;
+
+          total_squared_error += (err_x_px * err_x_px + err_y_px * err_y_px);
+          
+          valid_points_count++;
+        }
+      }
+      
+      if (valid_points_count > 0) {
+          double mse = total_squared_error / valid_points_count;
+          std::cout << "\n==================================================" << std::endl;
+          std::cout << "          FINAL METRICS FOR REPORT TABLE          " << std::endl;
+          std::cout << "==================================================" << std::endl;
+          std::cout << "Camera File Used:             " << camera_calib_path << std::endl;
+          std::cout << "Focal Length Applied:         fx=" << f_x << ", fy=" << f_y << std::endl;
+          std::cout << "Density (Valid Observations): " << valid_points_count << std::endl;
+          std::cout << "Mean Squared Error (MSE):     " << mse << " px^2" << std::endl;
+          std::cout << "Root Mean Squared Error:      " << std::sqrt(mse) << " px" << std::endl;
+          std::cout << "==================================================\n" << std::endl;
+      }
       std::cout<<"Recostruction completed, exiting"<<std::endl;
       return;
     }
@@ -894,17 +966,18 @@ bool BasicSfM::incrementalReconstruction( int seed_pair_idx0, int seed_pair_idx1
 
 	//  if( < reconstruction has diverged > )
     //    return false;
-	// Se dopo l'ottimizzazione la telecamera appena aggiunta è stata rigettata 
-	// (cioè l'iterazione di ottimizzazione è scesa sotto zero)
-	if (cam_pose_optim_iter_[new_cam_pose_idx] < 0) {
-	  std::cout << "Camera " << new_cam_pose_idx << " rejected by optimization. Reconstruction failed. Resetting..." << std::endl;
-	  
-	  // Resetta tutto lo stato interno (punti, telecamere, ecc.)
-	  reset();
-	  
-	  // Ritorna false in modo che il ciclo esterno in `solve()` provi il prossimo seed pair
-	  return false;
-	}
+    
+    // If after optimization the newly added camera has been rejected 
+    // (i.e., the optimization iteration state dropped below zero)
+    if (cam_pose_optim_iter_[new_cam_pose_idx] < 0) {
+      std::cout << "Camera " << new_cam_pose_idx << " rejected by optimization. Reconstruction failed. Resetting..." << std::endl;
+      
+      // Reset the entire internal state (points, cameras, etc.)
+      reset();
+      
+      // Return false so that the outer loop in `solve()` attempts the next seed pair
+      return false;
+    }
 
     /////////////////////////////////////////////////////////////////////////////////////////
   }
@@ -967,22 +1040,23 @@ void BasicSfM::bundleAdjustmentIter( int new_cam_idx )
         // where 'a' is a scale parameter (e.g., 1.0 or 2 * max_reproj_err_).
         //////////////////////////////////////////////////////////////////////////////////
 
-        // Recuperiamo le coordinate 2D dell'osservazione
+       // Retrieve the 2D coordinates of the observation
         double obs_x = observations_[2 * i_obs];
         double obs_y = observations_[2 * i_obs + 1];
 
-        // Creiamo la funzione di costo usando la Factory che abbiamo scritto sopra
+        // Create the cost function using the Factory method defined above
         ceres::CostFunction* cost_function = ReprojectionError::Create(obs_x, obs_y);
 
-        // LOSS ROBUSTA: Usiamo CauchyLoss per abbattere l'effetto dei match sbagliati (outlier).
-        // Il parametro di scala è proporzionale al nostro errore massimo accettabile.
-        ceres::LossFunction* loss_function = new ceres::CauchyLoss(2.0 * max_reproj_err_);
+        // ROBUST LOSS: Use CauchyLoss to attenuate the effect of mismatched features (outliers).
+        // The scale parameter is proportional to our maximum acceptable error.
+        // ceres::LossFunction* loss_function = new ceres::CauchyLoss(2.0 * max_reproj_err_);
+        ceres::LossFunction* loss_function = nullptr;
 
-        // Otteniamo i puntatori in memoria per i parametri della telecamera e del punto 3D
+        // Obtain memory pointers for the camera parameters and the 3D point
         double* camera = cameraBlockPtr(cam_pose_index_[i_obs]);
         double* point = pointBlockPtr(point_index_[i_obs]);
 
-        // Aggiungiamo tutto al problema
+        // Add the residual block to the optimization problem
         problem.AddResidualBlock(cost_function, loss_function, camera, point);
         
         /////////////////////////////////////////////////////////////////////////////////////////
