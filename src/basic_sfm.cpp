@@ -1049,8 +1049,8 @@ void BasicSfM::bundleAdjustmentIter( int new_cam_idx )
 
         // ROBUST LOSS: Use CauchyLoss to attenuate the effect of mismatched features (outliers).
         // The scale parameter is proportional to our maximum acceptable error.
-        // ceres::LossFunction* loss_function = new ceres::CauchyLoss(2.0 * max_reproj_err_);
-        ceres::LossFunction* loss_function = nullptr;
+        ceres::LossFunction* loss_function = new ceres::CauchyLoss(2.0 * max_reproj_err_);
+        //ceres::LossFunction* loss_function = nullptr;
 
         // Obtain memory pointers for the camera parameters and the 3D point
         double* camera = cameraBlockPtr(cam_pose_index_[i_obs]);
